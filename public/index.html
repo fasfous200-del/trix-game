@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>لعبة تركس أونلاين</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #2e7d32; color: white; text-align: center; margin: 0; padding: 20px; }
+        #game-board { max-width: 800px; margin: 0 auto; background: #1b5e20; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); }
+        .card { display: inline-block; width: 60px; height: 90px; background: white; color: black; border-radius: 6px; margin: 5px; line-height: 90px; font-weight: bold; font-size: 18px; cursor: pointer; user-select: none; }
+        .card.Red { color: red; }
+        .contract-btn { padding: 10px 15px; margin: 5px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; background: #ffeb3b; color: #333; font-weight: bold; }
+        #status { font-size: 20px; margin-bottom: 15px; font-weight: bold; }
+        #scoreboard { margin-top: 20px; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; }
+    </style>
+</head>
+<body>
+    <h1>🃏 لعبة تركس أونلاين 🃏</h1>
+    <div id="status">في انتظار انضمام باقي اللاعبين (4 لاعبين)...</div>
+
+    <div id="game-board">
+        <div id="contracts" style="display: none;">
+            <h3>اختر المملكة:</h3>
+            <button class="contract-btn" onclick="selectContract('KingOfHearts')">شيخ الكبة</button>
+            <button class="contract-btn" onclick="selectContract('Queens')">البنات</button>
+            <button class="contract-btn" onclick="selectContract('Diamonds')">الديناري</button>
+            <button class="contract-btn" onclick="selectContract('Tricks')">اللطشات</button>
+            <button class="contract-btn" onclick="selectContract('Trix')">تركس</button>
+        </div>
+
+        <h3>الطاولة:</h3>
+        <div id="table"></div>
+
+        <h3>أوراقك:</h3>
+        <div id="hand"></div>
+    </div>
+
+    <div id="scoreboard">
+        <h3>النتائج:</h3>
+        <div id="scores">-</div>
+    </div>
+
+    <script>
+        const socket = io();
+        let mySeat = null;
+        let myHand = [];
+
+        socket.on('playerAssigned', (data) => {
+            mySeat = data.seat;
+            document.getElementById('status').innerText = `أنت اللاعب رقم ${mySeat}. في انتظار اكتمال 4 لاعبين...`;
+        });
+
+        socket.on('gameStart', (data) => {
+            myHand = data.hand;
+            renderHand();
+            updateScores(data.scores);
+            if (data.kingSeat === mySeat) {
+                document.getElementById('status').innerText = "أنت المملكة! قم باختيار العقد.";
+                document.getElementById('contracts').style.display = 'block';
+            } else {
+                document.getElementById('status').innerText = `بدأت اللعبة! انتظار المملكة (لاعب ${data.kingSeat}) ليختار العقد.`;
+            }
+        });
+
+        socket.on('contractSelected', (data) => {
+            document.getElementById('contracts').style.display = 'none';
+            document.getElementById('status').innerText = `العقد المختار: ${data.contract}. الدور الآن للاعب ${data.currentTurn}`;
+        });
+
+        socket.on('cardPlayed', (data) => {
+            document.getElementById('status').innerText = `لعب اللاعب ${data.playedBy}. الدور الآن للاعب ${data.currentTurn}`;
+            renderTable(data.tableCards);
+        });
+
+        socket.on('trickComplete', (data) => {
+            renderTable(data.tableCards);
+            document.getElementById('status').innerText = `أخذ الأكلة اللاعب ${data.winnerSeat}! الدور التالي له.`;
+            updateScores(data.scores);
+            setTimeout(() => { renderTable([]); }, 2000);
+        });
+
+        function renderHand() {
+            const handDiv = document.getElementById('hand');
+            handDiv.innerHTML = '';
+            myHand.forEach(card => {
+                const cardEl = document.createElement('div');
+                const isRed = card.suit === 'Hearts' || card.suit === 'Diamonds';
+                cardEl.className = `card ${isRed ? 'Red' : ''}`;
+                const suitIcons = { 'Hearts': '♥', 'Diamonds': '♦', 'Clubs': '♣', 'Spades': '♠' };
+                const valMap = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
+                cardEl.innerText = `${valMap[card.value] || card.value} ${suitIcons[card.suit]}`;
+                cardEl.onclick = () => playCard(card);
+                handDiv.appendChild(cardEl);
+            });
+        }
+
+        function renderTable(cards) {
+            const tableDiv = document.getElementById('table');
+            tableDiv.innerHTML = '';
+            cards.forEach(tc => {
+                const cardEl = document.createElement('div');
+                const isRed = tc.card.suit === 'Hearts' || tc.card.suit === 'Diamonds';
+                cardEl.className = `card ${isRed ? 'Red' : ''}`;
+                const suitIcons = { 'Hearts': '♥', 'Diamonds': '♦', 'Clubs': '♣', 'Spades': '♠' };
+                const valMap = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
+                cardEl.innerText = `${valMap[tc.card.value] || tc.card.value} ${suitIcons[tc.card.suit]}`;
+                tableDiv.appendChild(cardEl);
+            });
+        }
+
+        function selectContract(contract) {
+            socket.emit('selectContract', contract);
+        }
+
+        function playCard(card) {
+            socket.emit('playCard', card);
+        }
+
+        function updateScores(scores) {
+            document.getElementById('scores').innerText = scores.map(s => `لاعب ${s.seat}: ${s.score} نقطة`).join(' | ');
+        }
+    </script>
+</body>
+</html>
